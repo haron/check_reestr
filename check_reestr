@@ -6,8 +6,11 @@ from itertools import chain
 import socket
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from ipaddress import ip_network, ip_address
 
 backresolve_cache = {}
+args = None
+blocked_networks_cache = {}
 
 
 # any name, including multiple A records like "google.com" will be resolved to a list of IPs
@@ -28,7 +31,7 @@ def get_ansible_inventory(url):
         return set(chain(*requests.get(url).json().values()))
     except Exception as e:
         print("Cannot fetch Ansible inventory from URL '%s': %s" % (url, e))
-        sys.exit(2)
+        sys.exit(3)
 
 
 def parallel_resolve(hostnames):
@@ -69,7 +72,35 @@ def get_hosts_to_check(args):
     return hosts
 
 
+def get_reestr(api_url):
+    data = requests.get(api_url).json()
+    networks = [ip_network(a) for a in data if "/" in a]
+    ips = [a for a in data if "/" not in a]
+    return set(ips), networks
+
+
+def check_ips(our_ips):
+    blocked_ips, blocked_networks = get_reestr(args.reestr)
+    ret = our_ips & blocked_ips
+    for ip in our_ips:
+        ip_obj = ip_address(ip)
+        for net in blocked_networks:
+            if ip_obj in net:
+                ret = ret | set([ip])
+                blocked_networks_cache[ip] = net
+    return ret
+
+
+def ip_info(ip):
+    if ip in blocked_networks_cache:
+        return "%s (%s in blocked network %s)" % (backresolve_cache[ip], ip, blocked_networks_cache[ip])
+    else:
+        return "%s (%s)" % (backresolve_cache[ip], ip)
+
+
 def main():
+    global args
+
     exit_code = 0
     exit_msg = "No blocked hosts"
 
@@ -78,13 +109,12 @@ def main():
 
     if hosts:
         ips = parallel_resolve(hosts)
-        reestr = set(requests.get(args.reestr).json())
-        found_ips = reestr & ips
+        found_ips = check_ips(ips)
 
         if found_ips:
             exit_code = 2
             exit_msg = "Hosts found in RKN registry: %s. Verify at https://blocklist.rkn.gov.ru" % \
-                ", ".join(["%s (%s)" % (backresolve_cache[ip], ip) for ip in found_ips])
+                ", ".join([ip_info(ip) for ip in found_ips])
     else:
         exit_msg = "No hosts to check"
 
