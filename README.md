@@ -1,3 +1,9 @@
+# Prerequisites
+
+Python 3 and `requests` module installed. For Ubuntu:
+
+    sudo apt-get -y install python3-requests
+
 # Example
 
     > ./check_reestr t.me flibusta.is
