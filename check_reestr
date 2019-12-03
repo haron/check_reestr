@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+
+import requests
+import sys
+from itertools import chain
+import socket
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+
+backresolve_cache = {}
+
+
+# any name, including multiple A records like "google.com" will be resolved to a list of IPs
+def resolve(hostname):
+    try:
+        hostname = hostname.strip()
+        ret = [r[4][0] for r in socket.getaddrinfo(hostname, 80)]
+        for r in ret:
+            backresolve_cache[r] = hostname
+        return ret
+    except Exception as e:
+        sys.stderr.write("Error while resolving '%s': %s\n" % (hostname, e))
+        return []
+
+
+def get_ansible_inventory(url):
+    try:
+        return set(chain(*requests.get(url).json().values()))
+    except Exception as e:
+        print("Cannot fetch Ansible inventory from URL '%s': %s" % (url, e))
+        sys.exit(2)
+
+
+def parallel_resolve(hostnames):
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        return set(chain(*list(executor.map(resolve, hostnames))))
+
+
+def parse_args():
+    class BetterFormatter(argparse.ArgumentDefaultsHelpFormatter):
+        # adapt help text to the wider console window than default
+        def __init__(self, *args, **kwargs):
+            kwargs["width"] = 100
+            super().__init__(*args, **kwargs)
+
+    parser = argparse.ArgumentParser(formatter_class=BetterFormatter)
+    parser.add_argument("hosts", help="hosts to check", nargs="*",
+            default=[], metavar="host")
+    parser.add_argument("-i", "--inventory", help="Ansible inventory URL (hosts will be added to the list)",
+            default=None)
+    parser.add_argument("-r", "--reestr", help="RKN registry URL",
+            default="https://api.reserve-rbl.ru/api/v2/ips/json")
+    parser.add_argument("-x", "--exclude", help="ignore hosts, e.g. -x host1,host2,...",
+            default=set())
+    args = parser.parse_args()
+    args.hosts = set(args.hosts)
+
+    if args.exclude:
+        args.exclude = set(args.exclude.split(","))
+
+    return args
+
+
+def get_hosts_to_check(args):
+    ansible_hosts = set()
+    if args.inventory:
+        ansible_hosts = get_ansible_inventory(args.inventory)
+    hosts = (ansible_hosts | args.hosts) - args.exclude
+    return hosts
+
+
+def main():
+    exit_code = 0
+    exit_msg = "No blocked hosts"
+
+    args = parse_args()
+    hosts = get_hosts_to_check(parse_args())
+
+    if hosts:
+        ips = parallel_resolve(hosts)
+        reestr = set(requests.get(args.reestr).json())
+        found_ips = reestr & ips
+
+        if found_ips:
+            exit_code = 2
+            exit_msg = "Hosts found in RKN registry: %s. Verify at https://blocklist.rkn.gov.ru" % \
+                ", ".join(["%s (%s)" % (backresolve_cache[ip], ip) for ip in found_ips])
+    else:
+        exit_msg = "No hosts to check"
+
+    return exit_code, exit_msg
+
+
+if __name__ == "__main__":
+    exit_code, exit_msg = main()
+    print(exit_msg)
+    sys.exit(exit_code)
