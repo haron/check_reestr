@@ -28,7 +28,7 @@ Python 3 and `requests` module installed. For Ubuntu:
 
 If you have a [dynamic Ansible inventory](https://docs.ansible.com/ansible/latest/user_guide/intro_dynamic_inventory.html) somewhere in your infrastructure, you can use it directly:
 
-    > ./check_reestr -i http://your.inventory/address
+    > ./check_reestr -i http://your.inventory/data.json
 
 # WARNING
 
