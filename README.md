@@ -1,3 +1,7 @@
+# Russian
+
+Это плагин для Nagios/Icinga, который проверяет, попадают ли ваши IP в список заблокированных Роскомнадзором адресов и подсетей.
+
 # Prerequisites
 
 Python 3 and `requests` module installed. For Ubuntu:
